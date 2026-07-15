@@ -4,13 +4,13 @@ import { FORMATS, PLATFORMS, STYLES } from './brand.js'
 import { createCanvas, GRADIENT_PRESETS } from './utils/presets.js'
 import { generateFromBrief, generateImage, iteratePiece } from './utils/ai.js'
 import { historyPush, historyUndo, historyRedo, canUndo, canRedo } from './hooks/useHistory.js'
-import { saveProject, loadProject, listProjects } from './utils/supabase.js'
+import { saveProject, loadProject, listProjects, getSession, onAuthStateChange, signOut } from './utils/supabase.js'
 import PropertiesPanel from './components/PropertiesPanel.jsx'
 import IconPicker from './components/IconPicker.jsx'
 import ProjectsPanel from './components/ProjectsPanel.jsx'
+import AuthScreen from './components/AuthScreen.jsx'
 
 const API_KEY = import.meta.env.VITE_OPENAI_KEY || ''
-const USER_EMAIL = 'luisc@qurable.co'  // cambiar si hay más usuarios
 
 // Convierte un File a data URL base64 (persiste entre sesiones, a diferencia de blob:)
 const fileToDataURL = (file) => new Promise((resolve, reject) => {
@@ -428,6 +428,15 @@ function MockupFrame({ platform, formatKey, scale }) {
 
 // ── App ────────────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Auth ──
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  useEffect(() => {
+    getSession().then(s => { setSession(s); setAuthLoading(false) })
+    return onAuthStateChange(s => { setSession(s); setAuthLoading(false) })
+  }, [])
+
   // ── Theme ──
   const [themeName, setThemeName] = useState('dark')
   const C = THEMES[themeName]
@@ -1311,6 +1320,17 @@ CRÍTICO:
   const _canUndo = canUndo(histIdx)
   const _canRedo = canRedo(histStack, histIdx)
 
+  // Auth gates
+  if (authLoading) return (
+    <div style={{ height: '100vh', background: '#0A0A14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid rgba(100,48,247,0.3)', borderTopColor: '#6430F7', animation: 'spin 0.7s linear infinite' }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
+  )
+  if (!session) return <AuthScreen />
+
+  const USER_EMAIL = session.user.email
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: C.bg, overflow: 'hidden', fontFamily: "'PP Neue Montreal', sans-serif", color: C.text }}>
       <style>{`
@@ -1375,6 +1395,8 @@ CRÍTICO:
                   label: 'Guardar como…', shortcut: '⌘⇧S',
                   action: () => { setShowFileMenu(false); setSaveMode('saveAs'); setSaveOverwriteTarget(null); setShowSaveModal(true) }
                 },
+                null,
+                { label: `Cerrar sesión`, shortcut: USER_EMAIL.split('@')[0], action: () => { setShowFileMenu(false); signOut() } },
               ].map((item, i) => item === null ? (
                 <div key={i} style={{ height: 1, background: C.inputBorder, margin: '3px 4px' }} />
               ) : (
