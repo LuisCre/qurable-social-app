@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# macOS metadata
+.DS_Store
+._*
+**/.DS_Store
+**/._*
+
+# Vite timestamps
+vite.config.js.timestamp-*
+
+# Editor
+.vscode/
+.idea/
