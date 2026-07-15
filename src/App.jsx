@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { toPng, toJpeg } from 'html-to-image'
+import JSZip from 'jszip'
 import { FORMATS, PLATFORMS, STYLES } from './brand.js'
 import { createCanvas, GRADIENT_PRESETS } from './utils/presets.js'
 import { generateFromBrief, generateImage, iteratePiece } from './utils/ai.js'
@@ -512,6 +513,7 @@ export default function App() {
   const [aiReason, setAiReason] = useState(null)
   const [hasGenerated, setHasGenerated] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [exportModal, setExportModal] = useState(null) // null | 'png' | 'jpeg'
   const [composing, setComposing] = useState(false)
   const [showMockup, setShowMockup] = useState(false)
   const [bgTab, setBgTab] = useState('presets')
@@ -1154,26 +1156,33 @@ export default function App() {
     finally { setExporting(false); setSelectedId(prevSel) }
   }
 
-  // ── Export All (todos los slides) ──
+  // ── Export All (ZIP con todos los slides) ──
   const handleExportAll = async (type = 'png') => {
+    setExportModal(null)
     if (slides.length <= 1) { handleExport(type); return }
     setExporting(true)
     const prevSel = selectedId; setSelectedId(null); setEditingId(null)
     const origIdx = slideIdx
     try {
+      const zip = new JSZip()
+      const ext = type === 'png' ? 'png' : 'jpg'
+      const baseName = `qurable-${platform}-${formatKey.replace(':', 'x')}`
       for (let i = 0; i < slides.length; i++) {
         setSlideIdx(i)
-        await new Promise(r => setTimeout(r, 180))
+        await new Promise(r => setTimeout(r, 200))
         if (!canvasRef.current) continue
         const opts = { pixelRatio: 2 }
-        const url = type === 'png'
+        const dataUrl = type === 'png'
           ? await toPng(canvasRef.current, opts)
           : await toJpeg(canvasRef.current, { ...opts, quality: 0.95 })
-        const a = document.createElement('a'); a.href = url
-        a.download = `qurable-${platform}-s${i + 1}-${formatKey.replace(':', 'x')}.${type}`
-        a.click()
-        await new Promise(r => setTimeout(r, 120))
+        // dataUrl → base64 → zip
+        const base64 = dataUrl.split(',')[1]
+        zip.file(`${baseName}-s${i + 1}.${ext}`, base64, { base64: true })
       }
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+      a.download = `${baseName}-x${slides.length}.zip`; a.click()
+      URL.revokeObjectURL(a.href)
     } catch (err) { console.error(err) }
     finally {
       setExporting(false)
@@ -1480,12 +1489,6 @@ CRÍTICO:
           ⬜ Mockup
         </button>
         <span style={{ fontSize: 10, color: C.textFaint }}>{fmt.width}×{fmt.height}</span>
-        <button onClick={zoomOut} title="Zoom out (⌘−)"
-          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>−</button>
-        <span onClick={zoomFit} title="Ajustar al área (⌘0)"
-          style={{ fontSize: 10, color: C.textFaint, cursor: 'pointer', minWidth: 34, textAlign: 'center', userSelect: 'none' }}>{Math.round(zoomFactor * 100)}%</span>
-        <button onClick={zoomIn} title="Zoom in (⌘+)"
-          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>+</button>
         <button onClick={handleCompose} disabled={composing || elements.length === 0}
           title="Proponer un layout con IA para los elementos del canvas"
           onMouseEnter={e => { if (!composing) e.currentTarget.style.background = C.input }}
@@ -1502,29 +1505,23 @@ CRÍTICO:
           </div>
         )}
         <div style={{ width: 1, height: 18, background: C.sidebarBorder, margin: '0 2px', flexShrink: 0 }} />
-        <span style={{ fontSize: 9, color: C.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Exportar como</span>
-        <button onClick={() => handleExport('png')} disabled={exporting}
+        <span style={{ fontSize: 9, color: C.textFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Exportar</span>
+        <button
+          onClick={() => { slides.length > 1 ? setExportModal('png') : handleExport('png') }}
+          disabled={exporting}
           onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = C.input }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11 }}>
           {exporting ? '···' : '↓ PNG'}
         </button>
-        <button onClick={() => handleExport('jpeg')} disabled={exporting}
+        <button
+          onClick={() => { slides.length > 1 ? setExportModal('jpeg') : handleExport('jpeg') }}
+          disabled={exporting}
           onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = C.input }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11 }}>
           ↓ JPG
         </button>
-        {slides.length > 1 && (<>
-          <div style={{ width: 1, height: 14, background: C.inputBorder, margin: '0 1px', flexShrink: 0 }} />
-          <button onClick={() => handleExportAll('png')} disabled={exporting}
-            onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = C.input }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-            title={`Exportar los ${slides.length} slides como PNG`}
-            style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>
-            {exporting ? '···' : `↓ Todos (${slides.length})`}
-          </button>
-        </>)}
         <div style={{ width: 1, height: 18, background: C.sidebarBorder, margin: '0 2px', flexShrink: 0 }} />
         <button onClick={() => setThemeName(t => t === 'dark' ? 'light' : 'dark')} title="Cambiar tema"
           style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14 }}>
@@ -1950,12 +1947,25 @@ CRÍTICO:
       {/* ─── CENTER ─── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: C.canvasBg, minWidth: 0 }}>
 
-        {/* Canvas area */}
-        <div ref={canvasAreaRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '20px 20px 8px' }}>
+        {/* Canvas area wrapper: position:relative so floating controls stay fixed */}
+        <div ref={canvasAreaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+
+          {/* Scroll container — permite pan cuando el canvas supera el área */}
+          <div
+            onWheel={e => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); e.deltaY < 0 ? zoomIn() : zoomOut() } }}
+            style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+            {/* Inner centering wrapper — crece cuando el canvas es más grande */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: `max(100%, ${fmt.width * scale + 40}px)`,
+              height: `max(100%, ${fmt.height * scale + 40}px)`,
+              padding: '20px', boxSizing: 'border-box',
+            }}>
+
           {/* Outer shell: ocupa el espacio visual escalado */}
-          <div style={{ position: 'relative', width: fmt.width * scale, height: fmt.height * scale, flexShrink: 0, boxShadow: '0 4px 32px rgba(0,0,0,0.32), 0 0 0 1px rgba(0,0,0,0.14)' }}>
+          <div style={{ position: 'relative', width: fmt.width * scale, height: fmt.height * scale, flexShrink: 0, boxShadow: '0 4px 32px rgba(0,0,0,0.32), 0 0 0 1px rgba(0,0,0,0.14)', transition: 'width 0.18s ease, height 0.18s ease' }}>
             {/* Scale wrapper: aplica el zoom visual. canvasRef NO tiene transform → export limpio */}
-            <div style={{ position: 'absolute', top: 0, left: 0, width: fmt.width, height: fmt.height, transformOrigin: 'top left', transform: `scale(${scale})` }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: fmt.width, height: fmt.height, transformOrigin: 'top left', transform: `scale(${scale})`, transition: 'transform 0.18s ease' }}>
               <div
                 ref={canvasRef}
                 onClick={e => { if (e.target === e.currentTarget) { setSelectedId(null); setEditingId(null) } }}
@@ -2071,7 +2081,37 @@ CRÍTICO:
               </div>
             )}
           </div>
-        </div>
+
+            </div> {/* /inner centering wrapper */}
+          </div> {/* /scroll container */}
+
+          {/* ─── Floating zoom controls ─── */}
+          <div style={{
+            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 50, display: 'flex', alignItems: 'center', gap: 1,
+            background: 'rgba(14,14,18,0.88)', backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.07)',
+            borderRadius: 10, padding: '4px 6px',
+            boxShadow: '0 2px 20px rgba(0,0,0,0.5)',
+            pointerEvents: 'auto',
+          }}>
+            <button onClick={zoomOut} title="Zoom out (⌘−)"
+              style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: 16, borderRadius: 6, lineHeight: 1 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>−</button>
+            <span
+              onClick={zoomFit}
+              title="Ajustar al área (⌘0)"
+              style={{ fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.75)', cursor: 'pointer', minWidth: 44, textAlign: 'center', userSelect: 'none', letterSpacing: '-0.01em' }}>
+              {Math.round(zoomFactor * 100)}%
+            </span>
+            <button onClick={zoomIn} title="Zoom in (⌘+)"
+              style={{ width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: 16, borderRadius: 6, lineHeight: 1 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>+</button>
+          </div>
+
+        </div> {/* /canvas area wrapper */}
 
         {/* Carousel strip */}
         {(() => {
@@ -2374,6 +2414,40 @@ CRÍTICO:
                 {imageAILoading ? '✦ Generando imagen...' : '✦ Generar y agregar al canvas'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Export Modal ─── */}
+      {exportModal && (
+        <div onClick={() => setExportModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.sidebar, border: `1px solid ${C.sidebarBorder}`, borderRadius: 14, padding: '28px 28px 24px', width: 320, boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+            <div style={{ fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 6 }}>
+              Exportar como {exportModal.toUpperCase()}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 22, lineHeight: 1.5 }}>
+              Tenés {slides.length} slides. ¿Qué querés exportar?
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => { setExportModal(null); handleExport(exportModal) }}
+                style={{ padding: '11px 14px', borderRadius: 8, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.text, cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: '500' }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = C.accent}
+                onMouseLeave={e => e.currentTarget.style.borderColor = C.inputBorder}>
+                ↓ Este slide — slide {slideIdx + 1}
+              </button>
+              <button
+                onClick={() => handleExportAll(exportModal)}
+                style={{ padding: '11px 14px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#6430F7,#4318CC)', color: '#fff', cursor: 'pointer', fontSize: 13, textAlign: 'left', fontWeight: '600' }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+                ↓ Todos los slides ({slides.length}) — ZIP
+              </button>
+            </div>
+            <button onClick={() => setExportModal(null)}
+              style={{ marginTop: 16, width: '100%', padding: '8px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textFaint, cursor: 'pointer', fontSize: 11 }}>
+              Cancelar
+            </button>
           </div>
         </div>
       )}
