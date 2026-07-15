@@ -494,6 +494,9 @@ export default function App() {
   const [dragging, setDragging] = useState(null)
   const resizingRef = useRef(null)
   const [scale, setScale] = useState(0.5)
+  const autoScaleRef = useRef(0.5)
+  const [zoomFactor, setZoomFactor] = useState(1.0)
+  const zoomFactorRef = useRef(1.0)
   const [snapGuides, setSnapGuides] = useState([])
 
   const selectedEl = elements.find(e => e.id === selectedId)
@@ -544,8 +547,13 @@ export default function App() {
     const calc = () => {
       if (!canvasAreaRef.current) return
       const { width: pw, height: ph } = canvasAreaRef.current.getBoundingClientRect()
-      setScale(Math.min((pw - 48) / fmt.width, (ph - 100) / fmt.height, 1))
+      const auto = Math.min((pw - 48) / fmt.width, (ph - 100) / fmt.height, 1)
+      autoScaleRef.current = auto
+      setScale(auto * zoomFactorRef.current)
     }
+    // Reset zoom when format changes
+    zoomFactorRef.current = 1.0
+    setZoomFactor(1.0)
     calc()
     const ro = new ResizeObserver(calc)
     if (canvasAreaRef.current) ro.observe(canvasAreaRef.current)
@@ -562,6 +570,9 @@ export default function App() {
       if (meta && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
       if (meta && e.key === 's' && e.shiftKey) { e.preventDefault(); setSaveMode('saveAs'); setShowSaveModal(true); setSaveOverwriteTarget(null); return }
       if (meta && e.key === 's') { e.preventDefault(); if (currentProjectId) { handleSave() } else { setSaveMode('save'); setShowSaveModal(true) } return }
+      if (meta && (e.key === '=' || e.key === '+')) { e.preventDefault(); zoomIn(); return }
+      if (meta && e.key === '-') { e.preventDefault(); zoomOut(); return }
+      if (meta && e.key === '0') { e.preventDefault(); zoomFit(); return }
 
       if (isInput) return
 
@@ -1105,6 +1116,25 @@ export default function App() {
     finally { setAiLoading(false) }
   }
 
+  // ── Zoom ──
+  const zoomIn = useCallback(() => {
+    const nz = Math.min(+(zoomFactorRef.current + 0.15).toFixed(2), 3.0)
+    zoomFactorRef.current = nz
+    setZoomFactor(nz)
+    setScale(autoScaleRef.current * nz)
+  }, [])
+  const zoomOut = useCallback(() => {
+    const nz = Math.max(+(zoomFactorRef.current - 0.15).toFixed(2), 0.2)
+    zoomFactorRef.current = nz
+    setZoomFactor(nz)
+    setScale(autoScaleRef.current * nz)
+  }, [])
+  const zoomFit = useCallback(() => {
+    zoomFactorRef.current = 1.0
+    setZoomFactor(1.0)
+    setScale(autoScaleRef.current)
+  }, [])
+
   // ── Export ──
   // canvasRef apunta al div interno sin transform → html-to-image captura a dimensiones nativas (fmt.width × fmt.height)
   // pixelRatio:2 dobla la resolución → salida 2× (ej: 2160×2700 para 4:5)
@@ -1122,6 +1152,34 @@ export default function App() {
       a.download = `qurable-${platform}-s${slideIdx + 1}-${formatKey.replace(':', 'x')}.${type}`; a.click()
     } catch (err) { console.error(err) }
     finally { setExporting(false); setSelectedId(prevSel) }
+  }
+
+  // ── Export All (todos los slides) ──
+  const handleExportAll = async (type = 'png') => {
+    if (slides.length <= 1) { handleExport(type); return }
+    setExporting(true)
+    const prevSel = selectedId; setSelectedId(null); setEditingId(null)
+    const origIdx = slideIdx
+    try {
+      for (let i = 0; i < slides.length; i++) {
+        setSlideIdx(i)
+        await new Promise(r => setTimeout(r, 180))
+        if (!canvasRef.current) continue
+        const opts = { pixelRatio: 2 }
+        const url = type === 'png'
+          ? await toPng(canvasRef.current, opts)
+          : await toJpeg(canvasRef.current, { ...opts, quality: 0.95 })
+        const a = document.createElement('a'); a.href = url
+        a.download = `qurable-${platform}-s${i + 1}-${formatKey.replace(':', 'x')}.${type}`
+        a.click()
+        await new Promise(r => setTimeout(r, 120))
+      }
+    } catch (err) { console.error(err) }
+    finally {
+      setExporting(false)
+      setSlideIdx(origIdx)
+      setSelectedId(prevSel)
+    }
   }
 
   const handleCompose = async () => {
@@ -1421,7 +1479,13 @@ CRÍTICO:
         <button onClick={() => setShowMockup(!showMockup)} style={{ ...btn(showMockup), padding: '5px 11px' }}>
           ⬜ Mockup
         </button>
-        <span style={{ fontSize: 10, color: C.textFaint }}>{fmt.width}×{fmt.height} · {Math.round(scale * 100)}%</span>
+        <span style={{ fontSize: 10, color: C.textFaint }}>{fmt.width}×{fmt.height}</span>
+        <button onClick={zoomOut} title="Zoom out (⌘−)"
+          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>−</button>
+        <span onClick={zoomFit} title="Ajustar al área (⌘0)"
+          style={{ fontSize: 10, color: C.textFaint, cursor: 'pointer', minWidth: 34, textAlign: 'center', userSelect: 'none' }}>{Math.round(zoomFactor * 100)}%</span>
+        <button onClick={zoomIn} title="Zoom in (⌘+)"
+          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 5, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>+</button>
         <button onClick={handleCompose} disabled={composing || elements.length === 0}
           title="Proponer un layout con IA para los elementos del canvas"
           onMouseEnter={e => { if (!composing) e.currentTarget.style.background = C.input }}
@@ -1451,6 +1515,16 @@ CRÍTICO:
           style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11 }}>
           ↓ JPG
         </button>
+        {slides.length > 1 && (<>
+          <div style={{ width: 1, height: 14, background: C.inputBorder, margin: '0 1px', flexShrink: 0 }} />
+          <button onClick={() => handleExportAll('png')} disabled={exporting}
+            onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = C.input }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            title={`Exportar los ${slides.length} slides como PNG`}
+            style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}>
+            {exporting ? '···' : `↓ Todos (${slides.length})`}
+          </button>
+        </>)}
         <div style={{ width: 1, height: 18, background: C.sidebarBorder, margin: '0 2px', flexShrink: 0 }} />
         <button onClick={() => setThemeName(t => t === 'dark' ? 'light' : 'dark')} title="Cambiar tema"
           style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 14 }}>
