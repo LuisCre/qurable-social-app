@@ -14,7 +14,9 @@ export default function AuthScreen() {
       await signInWithMagicLink(email.trim().toLowerCase())
       setStatus('sent')
     } catch (err) {
-      setError(err.message || 'Error al enviar el link')
+      let msg = err?.message
+      if (!msg || msg === '{}' || msg === '[object Object]') msg = 'No se pudo enviar el link. Intentá de nuevo.'
+      setError(msg)
       setStatus('error')
     }
   }

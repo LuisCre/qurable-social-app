@@ -56,7 +56,12 @@ export async function signInWithMagicLink(email) {
     email,
     options: { emailRedirectTo: window.location.origin },
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const msg = (typeof error.message === 'string' && error.message && error.message !== '{}')
+      ? error.message
+      : error.error_description || error.code || null
+    throw new Error(msg || 'No se pudo enviar el link. Intentá de nuevo en unos segundos.')
+  }
 }
 
 export async function signOut() {
