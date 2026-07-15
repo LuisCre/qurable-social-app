@@ -57,6 +57,7 @@ export async function signInWithMagicLink(email) {
     options: { emailRedirectTo: window.location.origin },
   })
   if (error) {
+    console.error('[Supabase magic link error]', JSON.stringify(error))
     const msg = (typeof error.message === 'string' && error.message && error.message !== '{}')
       ? error.message
       : error.error_description || error.code || null
