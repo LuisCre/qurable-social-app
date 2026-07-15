@@ -8,7 +8,10 @@ export const supabase = (URL && KEY) ? createClient(URL, KEY) : null
 
 // ── Proyectos ─────────────────────────────────────────────────────────────────
 
+const NO_SUPABASE = 'Guardado en la nube no disponible (Supabase no configurado).'
+
 export async function listProjects(userEmail) {
+  if (!supabase) return []
   const { data, error } = await supabase
     .from('projects')
     .select('id, name, platform, format_key, thumbnail, created_at, updated_at')
@@ -19,6 +22,7 @@ export async function listProjects(userEmail) {
 }
 
 export async function saveProject({ id, userEmail, name, platform, formatKey, slides, thumbnail }) {
+  if (!supabase) throw new Error(NO_SUPABASE)
   const payload = {
     user_email: userEmail,
     name,
@@ -29,7 +33,6 @@ export async function saveProject({ id, userEmail, name, platform, formatKey, sl
     updated_at: new Date().toISOString(),
   }
   if (id) {
-    // Actualizar existente
     const { data, error } = await supabase
       .from('projects')
       .update(payload)
@@ -39,7 +42,6 @@ export async function saveProject({ id, userEmail, name, platform, formatKey, sl
     if (error) throw new Error(error.message)
     return data.id
   } else {
-    // Crear nuevo
     const { data, error } = await supabase
       .from('projects')
       .insert(payload)
@@ -51,6 +53,7 @@ export async function saveProject({ id, userEmail, name, platform, formatKey, sl
 }
 
 export async function loadProject(id) {
+  if (!supabase) throw new Error(NO_SUPABASE)
   const { data, error } = await supabase
     .from('projects')
     .select('*')
@@ -61,6 +64,7 @@ export async function loadProject(id) {
 }
 
 export async function deleteProject(id) {
+  if (!supabase) throw new Error(NO_SUPABASE)
   const { error } = await supabase
     .from('projects')
     .delete()
