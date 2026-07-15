@@ -526,6 +526,8 @@ export default function App() {
   const [imageAILoading, setImageAILoading] = useState(false)
   const [imageAIError, setImageAIError] = useState(null)
   // ── Cloud projects ──
+  const [recentProjects, setRecentProjects] = useState([])
+  const [showRecentsMenu, setShowRecentsMenu] = useState(false)
   const [showProjects, setShowProjects] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [saveMode, setSaveMode] = useState('save')           // 'save' | 'saveAs'
@@ -937,11 +939,13 @@ export default function App() {
     }
   }, [showSaveModal])
 
-  // Cierra el menú Archivo al hacer clic afuera
+  // Cierra el menú Archivo al hacer clic afuera; carga recientes al abrir
   useEffect(() => {
-    if (!showFileMenu) return
+    if (!showFileMenu) { setShowRecentsMenu(false); return }
     const onOut = (e) => { if (!fileMenuRef.current?.contains(e.target)) setShowFileMenu(false) }
     document.addEventListener('mousedown', onOut)
+    // Cargar proyectos recientes
+    listProjects(USER_EMAIL).then(data => setRecentProjects(data.slice(0, 7))).catch(() => {})
     return () => document.removeEventListener('mousedown', onOut)
   }, [showFileMenu])
 
@@ -1445,36 +1449,102 @@ CRÍTICO:
             Archivo <span style={{ fontSize: 8, opacity: 0.7 }}>▾</span>
           </button>
           {showFileMenu && (
-            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 300, background: C.sidebar, border: `1px solid ${C.inputBorder}`, borderRadius: 8, padding: '4px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', minWidth: 168 }}>
-              {[
-                { label: 'Abrir', shortcut: '', action: () => { setShowProjects(true); setShowFileMenu(false) } },
-                null,
-                { label: 'Nuevo', shortcut: '⌘N', action: () => { handleNew(); setShowFileMenu(false) } },
-                {
-                  label: 'Guardar', shortcut: '⌘S',
-                  action: () => {
-                    setShowFileMenu(false)
-                    if (currentProjectId) { handleSave() }
-                    else { setSaveMode('save'); setSaveOverwriteTarget(null); setShowSaveModal(true) }
-                  }
-                },
-                {
-                  label: 'Guardar como…', shortcut: '⌘⇧S',
-                  action: () => { setShowFileMenu(false); setSaveMode('saveAs'); setSaveOverwriteTarget(null); setShowSaveModal(true) }
-                },
-                null,
-                { label: `Cerrar sesión`, shortcut: USER_EMAIL.split('@')[0], action: () => { setShowFileMenu(false); signOut() } },
-              ].map((item, i) => item === null ? (
-                <div key={i} style={{ height: 1, background: C.inputBorder, margin: '3px 4px' }} />
-              ) : (
-                <button key={item.label} onClick={item.action}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
-                  onMouseEnter={e => { e.currentTarget.style.background = C.input }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
-                  <span>{item.label}</span>
-                  {item.shortcut && <span style={{ fontSize: 9, color: C.textFaint, flexShrink: 0 }}>{item.shortcut}</span>}
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 300, background: C.sidebar, border: `1px solid ${C.inputBorder}`, borderRadius: 8, padding: '4px', boxShadow: '0 8px 28px rgba(0,0,0,0.35)', minWidth: 192 }}>
+
+              {/* Abrir */}
+              <button onClick={() => { setShowProjects(true); setShowFileMenu(false) }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.input; setShowRecentsMenu(false) }}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                Abrir
+              </button>
+
+              {/* Abrir recientes — con submenu */}
+              <div style={{ position: 'relative' }}
+                onMouseEnter={() => setShowRecentsMenu(true)}
+                onMouseLeave={() => setShowRecentsMenu(false)}>
+                <button
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: showRecentsMenu ? C.input : 'transparent', border: 'none', color: recentProjects.length === 0 ? C.textFaint : C.text, cursor: recentProjects.length === 0 ? 'default' : 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}>
+                  <span>Abrir recientes</span>
+                  <span style={{ fontSize: 9, color: C.textFaint }}>›</span>
                 </button>
-              ))}
+                {showRecentsMenu && recentProjects.length > 0 && (
+                  <div style={{ position: 'absolute', top: 0, left: '100%', marginLeft: 4, zIndex: 301, background: C.sidebar, border: `1px solid ${C.inputBorder}`, borderRadius: 8, padding: '4px', boxShadow: '0 8px 28px rgba(0,0,0,0.4)', minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
+                    {recentProjects.map(p => (
+                      <button key={p.id}
+                        onClick={() => { handleLoadProject(p.id); setShowFileMenu(false) }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5 }}
+                        onMouseEnter={e => e.currentTarget.style.background = C.input}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                        {/* Mini thumbnail */}
+                        <div style={{ width: 32, height: 32, borderRadius: 4, flexShrink: 0, overflow: 'hidden', background: C.input, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {p.thumbnail
+                            ? <img src={p.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : <span style={{ fontSize: 14, opacity: 0.2 }}>🎨</span>
+                          }
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: '600', color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                          <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>
+                            {p.platform?.toUpperCase()} · {p.format_key} · {(() => {
+                              const diff = Date.now() - new Date(p.updated_at).getTime()
+                              const m = Math.floor(diff / 60000)
+                              if (m < 1) return 'ahora'
+                              if (m < 60) return `hace ${m}m`
+                              const h = Math.floor(m / 60)
+                              if (h < 24) return `hace ${h}h`
+                              return `hace ${Math.floor(h / 24)}d`
+                            })()}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ height: 1, background: C.inputBorder, margin: '3px 4px' }} />
+
+              {/* Nuevo */}
+              <button onClick={() => { handleNew(); setShowFileMenu(false) }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.input; setShowRecentsMenu(false) }}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span>Nuevo</span>
+                <span style={{ fontSize: 9, color: C.textFaint }}>⌘N</span>
+              </button>
+
+              {/* Guardar */}
+              <button
+                onClick={() => { setShowFileMenu(false); if (currentProjectId) { handleSave() } else { setSaveMode('save'); setSaveOverwriteTarget(null); setShowSaveModal(true) } }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.input; setShowRecentsMenu(false) }}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span>Guardar</span>
+                <span style={{ fontSize: 9, color: C.textFaint }}>⌘S</span>
+              </button>
+
+              {/* Guardar como */}
+              <button
+                onClick={() => { setShowFileMenu(false); setSaveMode('saveAs'); setSaveOverwriteTarget(null); setShowSaveModal(true) }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.input; setShowRecentsMenu(false) }}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span>Guardar como…</span>
+                <span style={{ fontSize: 9, color: C.textFaint }}>⌘⇧S</span>
+              </button>
+
+              <div style={{ height: 1, background: C.inputBorder, margin: '3px 4px' }} />
+
+              {/* Cerrar sesión */}
+              <button onClick={() => { setShowFileMenu(false); signOut() }}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', textAlign: 'left', padding: '7px 10px', background: 'transparent', border: 'none', color: C.text, cursor: 'pointer', fontSize: 11, borderRadius: 5, gap: 16 }}
+                onMouseEnter={e => { e.currentTarget.style.background = C.input; setShowRecentsMenu(false) }}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span>Cerrar sesión</span>
+                <span style={{ fontSize: 9, color: C.textFaint }}>{USER_EMAIL.split('@')[0]}</span>
+              </button>
+
             </div>
           )}
         </div>
