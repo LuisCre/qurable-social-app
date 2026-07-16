@@ -1195,6 +1195,37 @@ export default function App() {
     }
   }
 
+  // ── Export PDF (todos los slides como páginas de un solo PDF) ──
+  const handleExportPdf = async () => {
+    setExporting(true)
+    const prevSel = selectedId; setSelectedId(null); setEditingId(null)
+    const origIdx = slideIdx
+    try {
+      const { jsPDF } = await import('jspdf')
+      // Convertir px a mm a 96 DPI
+      const pxToMm = px => px * 25.4 / 96
+      const w = pxToMm(fmt.width)
+      const h = pxToMm(fmt.height)
+      const orientation = fmt.width >= fmt.height ? 'landscape' : 'portrait'
+      const pdf = new jsPDF({ orientation, unit: 'mm', format: [w, h], compress: true })
+      const baseName = `qurable-${platform}-${formatKey.replace(':', 'x')}`
+      for (let i = 0; i < slides.length; i++) {
+        setSlideIdx(i)
+        await new Promise(r => setTimeout(r, 200))
+        if (!canvasRef.current) continue
+        const dataUrl = await toPng(canvasRef.current, { pixelRatio: 2 })
+        if (i > 0) pdf.addPage([w, h], orientation)
+        pdf.addImage(dataUrl, 'PNG', 0, 0, w, h)
+      }
+      pdf.save(`${baseName}-${slides.length}p.pdf`)
+    } catch (err) { console.error(err) }
+    finally {
+      setExporting(false)
+      setSlideIdx(origIdx)
+      setSelectedId(prevSel)
+    }
+  }
+
   const handleCompose = async () => {
     if (elements.length === 0) return
     const apiKey = API_KEY
@@ -1591,6 +1622,14 @@ CRÍTICO:
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11 }}>
           ↓ JPG
+        </button>
+        <button
+          onClick={handleExportPdf}
+          disabled={exporting}
+          onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = C.input }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+          style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.inputBorder}`, background: 'transparent', color: C.textMuted, cursor: exporting ? 'default' : 'pointer', fontSize: 11 }}>
+          ↓ PDF
         </button>
         <div style={{ width: 1, height: 18, background: C.sidebarBorder, margin: '0 2px', flexShrink: 0 }} />
         <button onClick={() => setThemeName(t => t === 'dark' ? 'light' : 'dark')} title="Cambiar tema"
