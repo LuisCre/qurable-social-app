@@ -110,6 +110,28 @@ function ElementRenderer({ el, selected, multiSelected, editing, onMouseDown, on
   const base = { position: 'absolute', left: el.x, top: el.y, cursor: 'move', userSelect: 'none', zIndex: el.zIndex || 2, ...elTransformStyle, ...sel }
 
   if (el.type === 'text') {
+    // ── Rich text: si el elemento tiene richHtml guardado, renderizarlo directamente ──
+    if (el.richHtml) {
+      const isCenteredR = el.textAlign === 'center' || el.textAlign === 'right'
+      const richBase = {
+        ...base,
+        fontSize: el.fontSize, fontWeight: el.fontWeight || '400',
+        letterSpacing: el.letterSpacing, lineHeight: el.lineHeight,
+        textTransform: el.textTransform,
+        fontFamily: "'PP Neue Montreal', sans-serif",
+        whiteSpace: 'pre-wrap', color: el.color || '#fff',
+        ...(isCenteredR ? { width: el.maxWidth || canvasWidth, textAlign: el.textAlign } : { maxWidth: el.maxWidth }),
+      }
+      return (
+        <div data-el-id={el.id}
+          onMouseDown={e => onMouseDown(e, el.id)}
+          onDoubleClick={e => { e.stopPropagation(); onDoubleClick(el.id) }}
+          style={richBase}
+          dangerouslySetInnerHTML={{ __html: el.richHtml }}
+        />
+      )
+    }
+
     const hasPad = el.hasBg || el.hasBorder
     const isCentered = el.textAlign === 'center' || el.textAlign === 'right'
     const textStyle = isCentered
@@ -331,30 +353,135 @@ function ElementRenderer({ el, selected, multiSelected, editing, onMouseDown, on
   return null
 }
 
-// ── Inline text editor ────────────────────────────────────────────────────────
+// ── Inline text editor (rich text) ───────────────────────────────────────────
 function InlineEditor({ el, onDone }) {
-  const [val, setVal] = useState(el.content)
   const ref = useRef(null)
-  useEffect(() => { ref.current?.select() }, [])
+  const [toolbar, setToolbar] = useState(null) // { x, y } | null
+  const [toolColor, setToolColor] = useState('#ffffff')
+  const [toolSize, setToolSize]   = useState(String(el.fontSize || 64))
+
+  useEffect(() => {
+    if (!ref.current) return
+    if (el.richHtml) ref.current.innerHTML = el.richHtml
+    else ref.current.textContent = el.content || ''
+    // cursor al final
+    const range = document.createRange()
+    range.selectNodeContents(ref.current)
+    range.collapse(false)
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range)
+    ref.current.focus()
+  }, [])
+
+  const updateToolbar = () => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) { setToolbar(null); return }
+    const rect = sel.getRangeAt(0).getBoundingClientRect()
+    if (!rect.width) { setToolbar(null); return }
+    setToolbar({ x: rect.left + rect.width / 2, y: rect.top })
+  }
+
+  const applySpan = (styles) => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) return
+    const range = sel.getRangeAt(0)
+    const fragment = range.extractContents()
+    const span = document.createElement('span')
+    Object.assign(span.style, styles)
+    span.appendChild(fragment)
+    range.insertNode(span)
+    const newRange = document.createRange(); newRange.selectNodeContents(span)
+    sel.removeAllRanges(); sel.addRange(newRange)
+  }
+
+  const clearFormat = () => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) return
+    const range = sel.getRangeAt(0)
+    const text = range.toString()
+    range.deleteContents()
+    range.insertNode(document.createTextNode(text))
+  }
+
+  const handleDone = () => {
+    if (!ref.current) return
+    const html = ref.current.innerHTML
+    const text = ref.current.innerText
+    const hasRich = /<span[\s>]/i.test(html)
+    onDone({ text, html: hasRich ? html : null })
+  }
+
+  const TB = { // toolbar button style
+    width: 28, height: 28, borderRadius: 5,
+    border: '1px solid #3a3a3a', background: '#222', color: '#ddd',
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 12, flexShrink: 0,
+  }
+
   return (
-    <textarea ref={ref} value={val}
-      onChange={e => setVal(e.target.value)}
-      onBlur={() => onDone(val)}
-      onKeyDown={e => { if (e.key === 'Escape') onDone(val) }}
-      style={{
-        position: 'absolute', left: el.x, top: el.y,
-        width: el.maxWidth || 800, minHeight: el.fontSize * 1.2 + 16,
-        fontSize: el.fontSize, fontWeight: el.fontWeight || '400',
-        color: el.color || '#fff', letterSpacing: el.letterSpacing,
-        lineHeight: el.lineHeight,
-        fontFamily: "'PP Neue Montreal', sans-serif",
-        background: 'rgba(100,48,247,0.12)',
-        border: '2px solid rgba(100,48,247,0.7)',
-        borderRadius: 4, outline: 'none',
-        padding: 0, margin: 0, resize: 'none', overflow: 'hidden',
-        zIndex: 100,
-      }}
-    />
+    <>
+      <div
+        ref={ref}
+        contentEditable suppressContentEditableWarning
+        onMouseUp={updateToolbar} onKeyUp={updateToolbar}
+        onBlur={handleDone}
+        onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); handleDone() } }}
+        style={{
+          position: 'absolute', left: el.x || 0, top: el.y || 0,
+          width: el.maxWidth || 800,
+          minHeight: (el.fontSize || 64) * (el.lineHeight || 1.2) + 16,
+          fontSize: el.fontSize, fontWeight: el.fontWeight || '400',
+          color: el.color || '#fff', letterSpacing: el.letterSpacing,
+          lineHeight: el.lineHeight, textTransform: el.textTransform,
+          fontFamily: "'PP Neue Montreal', sans-serif",
+          whiteSpace: 'pre-wrap',
+          background: 'rgba(100,48,247,0.10)',
+          border: '2px solid rgba(100,48,247,0.65)',
+          borderRadius: 4, outline: 'none',
+          padding: 0, margin: 0, zIndex: 100,
+        }}
+      />
+      {toolbar && (
+        <div
+          onMouseDown={e => e.preventDefault()}
+          style={{
+            position: 'fixed', left: toolbar.x, top: toolbar.y - 8,
+            transform: 'translate(-50%, -100%)',
+            background: '#1a1a1a', border: '1px solid #333',
+            borderRadius: 8, padding: '5px 8px',
+            display: 'flex', alignItems: 'center', gap: 5,
+            zIndex: 99999, boxShadow: '0 6px 24px rgba(0,0,0,0.7)',
+            fontFamily: "'PP Neue Montreal', sans-serif",
+          }}
+        >
+          <button onMouseDown={e => { e.preventDefault(); applySpan({ fontWeight: '700' }) }}
+            style={{ ...TB, fontWeight: '700' }}>B</button>
+          <button onMouseDown={e => { e.preventDefault(); applySpan({ fontWeight: '400' }) }}
+            style={{ ...TB }}>R</button>
+          <button onMouseDown={e => { e.preventDefault(); applySpan({ fontStyle: 'italic' }) }}
+            style={{ ...TB, fontStyle: 'italic' }}>i</button>
+          <div style={{ width: 1, height: 18, background: '#333', flexShrink: 0 }} />
+          <input type="number" value={toolSize}
+            onChange={e => setToolSize(e.target.value)}
+            onMouseDown={e => e.stopPropagation()}
+            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) } }}
+            onBlur={e => { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) }}
+            style={{ width: 46, height: 28, borderRadius: 5, border: '1px solid #3a3a3a', background: '#222', color: '#fff', fontSize: 11, textAlign: 'center', outline: 'none', padding: '0 4px', flexShrink: 0 }}
+          />
+          <div style={{ width: 1, height: 18, background: '#333', flexShrink: 0 }} />
+          <div style={{ position: 'relative', width: 28, height: 28, flexShrink: 0 }}>
+            <input type="color" value={toolColor}
+              onChange={e => { setToolColor(e.target.value); applySpan({ color: e.target.value }) }}
+              onMouseDown={e => e.stopPropagation()}
+              style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+            />
+            <div style={{ width: 28, height: 28, borderRadius: 5, border: '2px solid #3a3a3a', background: toolColor, pointerEvents: 'none' }} />
+          </div>
+          <button onMouseDown={e => { e.preventDefault(); clearFormat() }}
+            title="Quitar formato"
+            style={{ ...TB, fontSize: 10 }}>✕</button>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -2181,7 +2308,14 @@ CRÍTICO:
                 ))}
                 {editingEl && (
                   <InlineEditor el={editingEl}
-                    onDone={(val) => { updateEl(editingId, { content: val }); setEditingId(null) }} />
+                    onDone={(val) => {
+                      if (val && typeof val === 'object') {
+                        updateEl(editingId, { content: val.text, richHtml: val.html || null })
+                      } else {
+                        updateEl(editingId, { content: val })
+                      }
+                      setEditingId(null)
+                    }} />
                 )}
                 {elements.length === 0 && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', gap: 12 }}>
