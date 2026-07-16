@@ -97,8 +97,8 @@ const THEMES = {
 }
 
 // ── Element Renderer ──────────────────────────────────────────────────────────
-function ElementRenderer({ el, selected, editing, onMouseDown, onDoubleClick, scale, canvasWidth = 1080 }) {
-  const sel = {}
+function ElementRenderer({ el, selected, multiSelected, editing, onMouseDown, onDoubleClick, scale, canvasWidth = 1080 }) {
+  const sel = multiSelected ? { outline: '2px dashed #6430F7', outlineOffset: '2px' } : {}
   const elTransformParts = [
     el.rotation ? `rotate(${el.rotation}deg)` : '',
     el.flipH ? 'scaleX(-1)' : '',
@@ -489,6 +489,7 @@ export default function App() {
 
   // ── Canvas selection & drag ──
   const [selectedId, setSelectedId] = useState(null)
+  const [multiSelectedIds, setMultiSelectedIds] = useState(new Set())
   const [editingId, setEditingId] = useState(null)
   const [layerDragId, setLayerDragId] = useState(null)
   const [layerOverId, setLayerOverId] = useState(null)
@@ -586,12 +587,17 @@ export default function App() {
         return
       }
 
-      if (e.key === 'Escape') { setSelectedId(null); setEditingId(null); return }
+      if (e.key === 'Escape') { setSelectedId(null); setEditingId(null); setMultiSelectedIds(new Set()); return }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && !editingId) {
-        e.preventDefault()
-        deleteEl(selectedId)
-        return
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !editingId) {
+        if (multiSelectedIds.size > 0) {
+          e.preventDefault()
+          pushHistory(slides)
+          setElements(prev => prev.filter(el => !multiSelectedIds.has(el.id)))
+          setMultiSelectedIds(new Set())
+          return
+        }
+        if (selectedId) { e.preventDefault(); deleteEl(selectedId); return }
       }
 
       if (selectedId && !editingId) {
@@ -609,7 +615,7 @@ export default function App() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [selectedId, editingId, slides, slideIdx])
+  }, [selectedId, multiSelectedIds, editingId, slides, slideIdx])
 
   // ── Drag ──
   useEffect(() => {
@@ -686,9 +692,22 @@ export default function App() {
   const handleMouseDown = (e, id) => {
     if (editingId) return
     e.stopPropagation(); e.preventDefault()
-    setSelectedId(id)
-    const el = elements.find(el => el.id === id)
-    if (el) setDragging({ id, sx: e.clientX, sy: e.clientY, ox: el.x, oy: el.y })
+    if (e.shiftKey) {
+      // Multi-select: seed with current selectedId on first shift+click
+      setMultiSelectedIds(prev => {
+        const next = new Set(prev)
+        if (next.size === 0 && selectedId) next.add(selectedId)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+      setSelectedId(null)
+    } else {
+      setMultiSelectedIds(new Set())
+      setSelectedId(id)
+      const el = elements.find(el => el.id === id)
+      if (el) setDragging({ id, sx: e.clientX, sy: e.clientY, ox: el.x, oy: el.y })
+    }
   }
 
   const handleDoubleClick = (id) => {
@@ -1092,7 +1111,7 @@ export default function App() {
       setElements(merged); setBg(canvas.bg); setAiReason(result.reasoning); setHasGenerated(true)
       if (result.needsImage && result.imagePrompt && API_KEY) {
         const url = await generateImage({ prompt: result.imagePrompt, format: formatKey, apiKey: API_KEY })
-        if (url) setBg({ type: 'image', value: url })
+        if (url) setBg({ type: 'image', value: url, posX: 50, posY: 50, fit: 'cover' })
       }
     } catch (err) { setAiError(err.message) }
     finally { setAiLoading(false) }
@@ -1193,6 +1212,49 @@ export default function App() {
       setSlideIdx(origIdx)
       setSelectedId(prevSel)
     }
+  }
+
+  // ── Multi-select: alineación entre elementos ──
+  const alignMulti = (type) => {
+    const ids = [...multiSelectedIds]
+    if (ids.length < 2) return
+    const boxes = ids.map(id => {
+      const el = elements.find(e => e.id === id)
+      const domEl = canvasRef.current?.querySelector(`[data-el-id="${id}"]`)
+      const w = domEl?.offsetWidth || 100
+      const h = domEl?.offsetHeight || 100
+      return { id, x: el?.x || 0, y: el?.y || 0, w, h }
+    })
+    const minX = Math.min(...boxes.map(b => b.x))
+    const maxX = Math.max(...boxes.map(b => b.x + b.w))
+    const minY = Math.min(...boxes.map(b => b.y))
+    const maxY = Math.max(...boxes.map(b => b.y + b.h))
+    const totalW = maxX - minX, totalH = maxY - minY
+    pushHistory(slides)
+    setElements(prev => prev.map(el => {
+      if (!ids.includes(el.id)) return el
+      const box = boxes.find(b => b.id === el.id)
+      let patch = {}
+      if (type === 'left') patch.x = minX
+      if (type === 'right') patch.x = maxX - box.w
+      if (type === 'centerH') patch.x = Math.round(minX + totalW / 2 - box.w / 2)
+      if (type === 'top') patch.y = minY
+      if (type === 'bottom') patch.y = maxY - box.h
+      if (type === 'centerV') patch.y = Math.round(minY + totalH / 2 - box.h / 2)
+      return { ...el, ...patch }
+    }))
+  }
+
+  // ── Multi-select: cambio de color en bloque ──
+  const bulkUpdateColor = (color) => {
+    const ids = [...multiSelectedIds]
+    pushHistory(slides)
+    setElements(prev => prev.map(el => {
+      if (!ids.includes(el.id)) return el
+      if (el.type === 'text' || el.type === 'button') return { ...el, color }
+      if (el.type === 'shape') return { ...el, fill: color }
+      return el
+    }))
   }
 
   // ── Export PDF (todos los slides como páginas de un solo PDF) ──
@@ -1779,7 +1841,7 @@ CRÍTICO:
                 ))}
                 <label style={{ height: 34, borderRadius: 7, border: `1px dashed ${C.inputBorder}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gridColumn: '1/-1' }}>
                   <input type="file" accept="image/*" style={{ display: 'none' }}
-                    onChange={async e => { const f = e.target.files?.[0]; if (f) setBg({ type: 'image', value: await fileToDataURL(f), posX: 50, posY: 50, zoom: 100 }) }} />
+                    onChange={async e => { const f = e.target.files?.[0]; if (f) setBg({ type: 'image', value: await fileToDataURL(f), posX: 50, posY: 50, fit: 'cover' }) }} />
                   <span style={{ fontSize: 10, color: C.textMuted }}>+ Subir imagen de fondo</span>
                 </label>
               </div>
@@ -1965,7 +2027,7 @@ CRÍTICO:
                 <button disabled={aiLoading || !bgPrompt.trim()}
                   onClick={async () => {
                     setAiLoading(true)
-                    try { const url = await generateImage({ prompt: bgPrompt, format: formatKey, apiKey: API_KEY }); if (url) setBg({ type: 'image', value: url }) }
+                    try { const url = await generateImage({ prompt: bgPrompt, format: formatKey, apiKey: API_KEY }); if (url) setBg({ type: 'image', value: url, posX: 50, posY: 50, fit: 'cover' }) }
                     catch (err) { setAiError(err.message) }
                     finally { setAiLoading(false) }
                   }}
@@ -2077,7 +2139,7 @@ CRÍTICO:
             <div style={{ position: 'absolute', top: 0, left: 0, width: fmt.width, height: fmt.height, transformOrigin: 'top left', transform: `scale(${scale})`, transition: 'transform 0.18s ease' }}>
               <div
                 ref={canvasRef}
-                onClick={e => { if (e.target === e.currentTarget) { setSelectedId(null); setEditingId(null) } }}
+                onClick={e => { if (e.target === e.currentTarget) { setSelectedId(null); setEditingId(null); setMultiSelectedIds(new Set()) } }}
                 style={{ position: 'relative', width: fmt.width, height: fmt.height, cursor: 'default', overflow: 'hidden', ...canvasBgStyle }}
               >
                 {/* Overlay sobre imagen de fondo */}
@@ -2105,6 +2167,7 @@ CRÍTICO:
                 {elements.map(el => (
                   <ElementRenderer key={el.id} el={el}
                     selected={el.id === selectedId}
+                    multiSelected={multiSelectedIds.has(el.id)}
                     editing={el.id === editingId}
                     onMouseDown={handleMouseDown}
                     onDoubleClick={handleDoubleClick}
@@ -2276,6 +2339,58 @@ CRÍTICO:
         <div style={{ padding: '11px 14px 9px', borderBottom: `1px solid ${C.panelBorder}`, flexShrink: 0 }}>
           <span style={{ fontSize: 9, fontWeight: '700', letterSpacing: '0.1em', color: C.textMuted, textTransform: 'uppercase' }}>Propiedades</span>
         </div>
+        {multiSelectedIds.size > 1 ? (() => {
+          // ── Panel de multi-selección ──
+          const [bulkColor, setBulkColorState] = [null, () => {}] // placeholder — usamos input directo
+          const alignBtns = [
+            { type: 'left',    icon: '⬅', label: 'Izq' },
+            { type: 'centerH', icon: '↔', label: 'Centro H' },
+            { type: 'right',   icon: '➡', label: 'Der' },
+            { type: 'top',     icon: '⬆', label: 'Arr' },
+            { type: 'centerV', icon: '↕', label: 'Centro V' },
+            { type: 'bottom',  icon: '⬇', label: 'Abj' },
+          ]
+          return (
+            <div style={{ padding: '14px 12px', overflowY: 'auto', flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: '700', color: C.text, marginBottom: 4 }}>
+                {multiSelectedIds.size} elementos seleccionados
+              </div>
+              <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 16 }}>
+                Shift+click para agregar o quitar. Esc para deseleccionar.
+              </div>
+              {/* Alineación */}
+              <div style={{ fontSize: 9, fontWeight: '700', color: C.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>Alinear entre sí</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginBottom: 16 }}>
+                {alignBtns.map(b => (
+                  <button key={b.type} onClick={() => alignMulti(b.type)}
+                    title={b.label}
+                    style={{ padding: '7px 4px', borderRadius: 6, border: `1px solid ${C.inputBorder}`, background: C.input, color: C.textMuted, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = C.accent}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = C.inputBorder}>
+                    {b.icon}
+                  </button>
+                ))}
+              </div>
+              {/* Color en bloque */}
+              <div style={{ fontSize: 9, fontWeight: '700', color: C.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>Color (texto / relleno)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <input type="color" defaultValue="#ffffff"
+                  onChange={e => bulkUpdateColor(e.target.value)}
+                  style={{ width: 36, height: 32, borderRadius: 6, border: `1px solid ${C.inputBorder}`, background: 'none', cursor: 'pointer', padding: 2 }} />
+                <span style={{ fontSize: 11, color: C.textMuted }}>Se aplica a todos los seleccionados</span>
+              </div>
+              {/* Eliminar */}
+              <div style={{ height: 1, background: C.sidebarBorder, margin: '4px 0 14px' }} />
+              <button
+                onClick={() => { pushHistory(slides); setElements(prev => prev.filter(el => !multiSelectedIds.has(el.id))); setMultiSelectedIds(new Set()) }}
+                style={{ width: '100%', padding: '8px', borderRadius: 7, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.07)', color: '#F87171', cursor: 'pointer', fontSize: 12, fontWeight: '600' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.14)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.07)'}>
+                Eliminar {multiSelectedIds.size} elementos
+              </button>
+            </div>
+          )
+        })() : (
         <PropertiesPanel
           el={selectedEl} fmt={fmt} C={C}
           onUpdate={patch => selectedId && updateEl(selectedId, patch)}
@@ -2286,6 +2401,7 @@ CRÍTICO:
           onMoveUp={() => selectedId && moveEl(selectedId, 1)}
           onMoveDown={() => selectedId && moveEl(selectedId, -1)}
         />
+        )}
         {/* Layer list */}
         {elements.length > 0 && (
           <div style={{ borderTop: `1px solid ${C.panelBorder}`, padding: '8px 10px 10px', overflowY: 'auto', flexShrink: 0 }}>
