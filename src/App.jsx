@@ -408,19 +408,10 @@ function InlineEditor({ el, onDone }) {
     setToolbar({ x: rect.left + rect.width / 2, y: rect.top })
   }
 
-  // Restaurar la selección guardada (necesario cuando el foco va al toolbar)
-  const restoreSelection = () => {
-    if (!savedSel.current) return
-    const sel = window.getSelection()
-    sel.removeAllRanges()
-    sel.addRange(savedSel.current)
-  }
-
+  // Aplica estilos a la selección guardada sin tocar el foco del teclado
   const applySpan = (styles) => {
-    restoreSelection()
-    const sel = window.getSelection()
-    if (!sel || sel.isCollapsed) return
-    const range = sel.getRangeAt(0)
+    const range = savedSel.current
+    if (!range || range.collapsed) return
     const fragment = range.extractContents()
     const span = document.createElement('span')
     Object.assign(span.style, styles)
@@ -428,18 +419,16 @@ function InlineEditor({ el, onDone }) {
     range.insertNode(span)
     const newRange = document.createRange()
     newRange.selectNodeContents(span)
-    sel.removeAllRanges(); sel.addRange(newRange)
-    savedSel.current = newRange.cloneRange()
+    savedSel.current = newRange
   }
 
   const clearFormat = () => {
-    restoreSelection()
-    const sel = window.getSelection()
-    if (!sel || sel.isCollapsed) return
-    const range = sel.getRangeAt(0)
+    const range = savedSel.current
+    if (!range || range.collapsed) return
     const text = range.toString()
     range.deleteContents()
     range.insertNode(document.createTextNode(text))
+    savedSel.current = null
   }
 
   const TB = {
@@ -496,7 +485,10 @@ function InlineEditor({ el, onDone }) {
             onChange={e => setToolSize(e.target.value)}
             onKeyDown={e => {
               e.stopPropagation()
-              if (e.key === 'Enter') { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) }
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' })
+              }
             }}
             onBlur={e => { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) }}
             style={{ width: 46, height: 28, borderRadius: 5, border: '1px solid #3a3a3a', background: '#222', color: '#fff', fontSize: 11, textAlign: 'center', outline: 'none', padding: '0 4px', flexShrink: 0 }}
