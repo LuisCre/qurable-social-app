@@ -355,16 +355,19 @@ function ElementRenderer({ el, selected, multiSelected, editing, onMouseDown, on
 
 // ── Inline text editor (rich text) ───────────────────────────────────────────
 function InlineEditor({ el, onDone }) {
-  const ref = useRef(null)
-  const [toolbar, setToolbar] = useState(null) // { x, y } | null
+  const ref      = useRef(null)
+  const tbRef    = useRef(null)   // toolbar DOM ref
+  const savedSel = useRef(null)   // selección guardada para restaurar cuando el foco va al toolbar
+  const doneRef  = useRef(null)   // referencia estable a handleDone para el listener
+  const [toolbar,   setToolbar]   = useState(null)
   const [toolColor, setToolColor] = useState('#ffffff')
-  const [toolSize, setToolSize]   = useState(String(el.fontSize || 64))
+  const [toolSize,  setToolSize]  = useState(String(el.fontSize || 64))
 
+  // Inicializar contenido y mover cursor al final
   useEffect(() => {
     if (!ref.current) return
     if (el.richHtml) ref.current.innerHTML = el.richHtml
     else ref.current.textContent = el.content || ''
-    // cursor al final
     const range = document.createRange()
     range.selectNodeContents(ref.current)
     range.collapse(false)
@@ -372,28 +375,65 @@ function InlineEditor({ el, onDone }) {
     ref.current.focus()
   }, [])
 
+  // Cerrar cuando el click cae fuera del editor Y del toolbar
+  useEffect(() => {
+    const handleDoneStable = () => {
+      if (!ref.current) return
+      const html = ref.current.innerHTML
+      const text = ref.current.innerText
+      const hasRich = /<span[\s>]/i.test(html)
+      onDone({ text, html: hasRich ? html : null })
+    }
+    doneRef.current = handleDoneStable
+
+    const onDocDown = (e) => {
+      const inEditor  = ref.current?.contains(e.target)
+      const inToolbar = tbRef.current?.contains(e.target)
+      if (!inEditor && !inToolbar) handleDoneStable()
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [onDone])
+
+  // Detectar selección y mostrar/ocultar toolbar
   const updateToolbar = () => {
     const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) { setToolbar(null); return }
-    const rect = sel.getRangeAt(0).getBoundingClientRect()
+    if (!sel || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) {
+      setToolbar(null); savedSel.current = null; return
+    }
+    const range = sel.getRangeAt(0)
+    savedSel.current = range.cloneRange()   // guardar selección
+    const rect = range.getBoundingClientRect()
     if (!rect.width) { setToolbar(null); return }
     setToolbar({ x: rect.left + rect.width / 2, y: rect.top })
   }
 
-  const applySpan = (styles) => {
+  // Restaurar la selección guardada (necesario cuando el foco va al toolbar)
+  const restoreSelection = () => {
+    if (!savedSel.current) return
     const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) return
+    sel.removeAllRanges()
+    sel.addRange(savedSel.current)
+  }
+
+  const applySpan = (styles) => {
+    restoreSelection()
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) return
     const range = sel.getRangeAt(0)
     const fragment = range.extractContents()
     const span = document.createElement('span')
     Object.assign(span.style, styles)
     span.appendChild(fragment)
     range.insertNode(span)
-    const newRange = document.createRange(); newRange.selectNodeContents(span)
+    const newRange = document.createRange()
+    newRange.selectNodeContents(span)
     sel.removeAllRanges(); sel.addRange(newRange)
+    savedSel.current = newRange.cloneRange()
   }
 
   const clearFormat = () => {
+    restoreSelection()
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
     const range = sel.getRangeAt(0)
@@ -402,15 +442,7 @@ function InlineEditor({ el, onDone }) {
     range.insertNode(document.createTextNode(text))
   }
 
-  const handleDone = () => {
-    if (!ref.current) return
-    const html = ref.current.innerHTML
-    const text = ref.current.innerText
-    const hasRich = /<span[\s>]/i.test(html)
-    onDone({ text, html: hasRich ? html : null })
-  }
-
-  const TB = { // toolbar button style
+  const TB = {
     width: 28, height: 28, borderRadius: 5,
     border: '1px solid #3a3a3a', background: '#222', color: '#ddd',
     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -422,9 +454,9 @@ function InlineEditor({ el, onDone }) {
       <div
         ref={ref}
         contentEditable suppressContentEditableWarning
-        onMouseUp={updateToolbar} onKeyUp={updateToolbar}
-        onBlur={handleDone}
-        onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); handleDone() } }}
+        onMouseUp={updateToolbar}
+        onKeyUp={updateToolbar}
+        onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); doneRef.current?.() } }}
         style={{
           position: 'absolute', left: el.x || 0, top: el.y || 0,
           width: el.maxWidth || 800,
@@ -442,7 +474,7 @@ function InlineEditor({ el, onDone }) {
       />
       {toolbar && (
         <div
-          onMouseDown={e => e.preventDefault()}
+          ref={tbRef}
           style={{
             position: 'fixed', left: toolbar.x, top: toolbar.y - 8,
             transform: 'translate(-50%, -100%)',
@@ -462,8 +494,10 @@ function InlineEditor({ el, onDone }) {
           <div style={{ width: 1, height: 18, background: '#333', flexShrink: 0 }} />
           <input type="number" value={toolSize}
             onChange={e => setToolSize(e.target.value)}
-            onMouseDown={e => e.stopPropagation()}
-            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) } }}
+            onKeyDown={e => {
+              e.stopPropagation()
+              if (e.key === 'Enter') { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) }
+            }}
             onBlur={e => { const v = parseInt(toolSize); if (v > 0) applySpan({ fontSize: v + 'px' }) }}
             style={{ width: 46, height: 28, borderRadius: 5, border: '1px solid #3a3a3a', background: '#222', color: '#fff', fontSize: 11, textAlign: 'center', outline: 'none', padding: '0 4px', flexShrink: 0 }}
           />
@@ -471,7 +505,6 @@ function InlineEditor({ el, onDone }) {
           <div style={{ position: 'relative', width: 28, height: 28, flexShrink: 0 }}>
             <input type="color" value={toolColor}
               onChange={e => { setToolColor(e.target.value); applySpan({ color: e.target.value }) }}
-              onMouseDown={e => e.stopPropagation()}
               style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
             />
             <div style={{ width: 28, height: 28, borderRadius: 5, border: '2px solid #3a3a3a', background: toolColor, pointerEvents: 'none' }} />
