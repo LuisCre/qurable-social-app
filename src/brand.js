@@ -28,16 +28,18 @@ export const BRAND = {
 }
 
 export const FORMATS = {
-  '1:1':  { width: 1080, height: 1080, label: '1:1 — Post cuadrado' },
-  '4:5':  { width: 1080, height: 1350, label: '4:5 — Post vertical' },
-  '9:16': { width: 1080, height: 1920, label: '9:16 — Story / Reel' },
-  '16:9': { width: 1920, height: 1080, label: '16:9 — Cover / Banner' },
+  '1:1':      { width: 1080, height: 1080, label: '1:1 — Post cuadrado' },
+  '4:5':      { width: 1080, height: 1350, label: '4:5 — Post vertical' },
+  '9:16':     { width: 1080, height: 1920, label: '9:16 — Story / Reel' },
+  '16:9':     { width: 1920, height: 1080, label: '16:9 — Landscape' },
+  'yt-cover': { width: 2560, height: 1440, label: 'YouTube Cover (2560×1440)' },
 }
 
 export const PLATFORMS = {
-  ig: { label: 'Instagram', formats: ['4:5', '9:16'], types: ['Post', 'Story', 'Carrusel', 'Reel'] },
-  ln: { label: 'LinkedIn',  formats: ['1:1', '4:5', '16:9'], types: ['Post', 'Carrusel', 'Banner'] },
-  fb: { label: 'Facebook',  formats: ['16:9', '1:1', '4:5'], types: ['Post', 'Story', 'Banner'] },
+  ig: { label: 'Instagram', formats: ['4:5', '9:16', '1:1'],          types: ['Post', 'Story', 'Carrusel', 'Reel'] },
+  ln: { label: 'LinkedIn',  formats: ['1:1', '4:5', '16:9'],           types: ['Post', 'Carrusel', 'Banner'] },
+  fb: { label: 'Facebook',  formats: ['16:9', '1:1', '4:5'],           types: ['Post', 'Story', 'Banner'] },
+  yt: { label: 'YouTube',   formats: ['yt-cover', '16:9', '9:16'],     types: ['Cover', 'Short', 'Thumbnail'] },
 }
 
 export const STYLES = [
